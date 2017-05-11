@@ -1,15 +1,17 @@
 #!/bin/bash
-cd /home/sarria/scripts/youtube/
-(
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/snap/bin
+echo $PATH
+cd ${0%/*}
+exec 200> lock_sync.lck
 exec 4>&1
 exec > verbose.log 2>&1
 #lock
-flock -xn 200 || exit 1
+flock -xn 200 || { echo lock already held >&4 ; exit 1 ; }
 #Mount Testing
 echo "Testing WebDav mount" >&4
 if [ ! -d /home/sarria/nextcloud/Music ]; then
  echo "WebDav is not mounted - Attempting to mount" >&4
- mount ~/nextcloud
+ mount ~/nextcloud 200>/dev/null
  if [ ! -d /home/sarria/nextcloud/Music ]; then
  	echo "Mounting failed, closing." >&4
  	exit 1
@@ -20,32 +22,35 @@ echo "WebDav Mounted, proceeding" >&4
 
 #Youtube-DL
 function download_shit() {
-youtube-dl -i --no-continue $3 --download-archive "archive/$1" --output "temp/$1/$2/%(uploader)s/%(title)s.%(ext)s" -f bestaudio $4
-filecount="$(find temp/$1/$2/ -maxdepth 1 -type f | wc -l)"
+youtube-dl -i --no-continue $3 --download-archive "archive/$1" --output "temp/$1/$2/$name/%(title)s.%(ext)s" -f bestaudio $4
+filecount="$(find temp/$1/$2/ -type f | wc -l)"
 }
 for fullusr in users/*
 do
 	user=$(basename $fullusr)
 	#Read each line of user config as new channel
 	runcount=0
-	while read chan; do
+	while read line; do
+		set -- $line #sets each space separated word as a $1+ argument
+		chan=$1
+		name=$2
+		if [ -z $name ]; then echo "No name on channel $chan of $user, skipping $line" >&4; continue; fi
 		runcount=$((runcount+1))
 		limiter="--playlist-end 5"
 		echo "$user: Scanning channel $runcount ..." >&4
 		download_shit "$user" "$runcount" "$limiter" "$chan"
 		#Checks if we should do a full scan
 		if [ $filecount = 0 ]; then
-			echo "$user: No new songs found on $chan" >&4
-			#break
+			echo "$user: No new songs found on $name" >&4
 		elif [ $filecount = 5 ]; then
-			echo "$user: Starting full scan" >&4
+			echo "$user: Starting full scan on $name" >&4
 			limiter="--playlist-start 6"
 			download_shit "$user" "$runcount" "$limiter" "$chan"
-			echo "$user: Found $filecount new songs" >&4
+			echo "$user: Found $filecount new songs on $name" >&4
 		elif [ $filecount = 1 ]; then
-			echo "$user: $filecount new song downloaded" >&4
+			echo "$user: $filecount new song downloaded on $name" >&4
 		else
-			echo "$user: $filecount new songs downloaded" >&4
+			echo "$user: $filecount new songs downloaded on $name" >&4
 		fi
 	done <$fullusr
 	if [ $(find temp/$user -type f | wc -l) -gt 0 ]; then
@@ -73,7 +78,7 @@ do
 			exit 1
 		fi
 	fi
+echo "############################################################" >&4
 done
 echo "Script Finished" >&4
-exit
-) 200> lock_sync.lck
+
